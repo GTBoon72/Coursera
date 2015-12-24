@@ -1,0 +1,206 @@
+# Tornadoes and flooding have the largest impact on public health and economy in the US, of all documented severe weather events. 
+By GTBoon72
+
+## Synopsis
+To help targeting prevention measures, the consequences of severe weather events on public health and economy were analysed. A dataset from the National Weather Service was obtained and used as input for this analysis, covering the years 1950 to 2011. In the earlier years, only the health and economic impact of tornadoes was documented, but since the early eighties many more types of severe weather events and their impact have been documented. 
+From the analysis it can be concluded that from all severe weather events in the United States of America, tornadoes have the largest impact on public health (fatalities as well as injuries). The economical impact on Property damage and Crop damage shows that in this dataset Property damage is historically up to 10 times higher. In recent years, flooding has caused the largest losses, but it should be considered that in this analysis the damage has not been corrected for inflation. 
+It is recommended that prevention targets concerning severe weather events should be focused on tornadoes and flooding. 
+
+## Data Processing
+The data was obtained from the Coursera website as a zipped, comma separated file. The R commands below show how this data was loaded into R. 
+
+The following data transformations have been executed on the data:
+- A column containing the year of the event was added, as calculated from the begin date field of the event, to allow yearly summarization of the impact;
+- Economical impact was calculated by multiplying the estimates in the PROPDMG and CROPDMG fields by the factor in the PROPDMGEXP and CROPDMG respectively. According to the documentation, only B (for Billion), M (for Million), and K (for Thousand) should have been entered. However, many more characters have been used, but their meaning was not documented; these factors were assumed to be 1, unless it was a lowercase B, M or K, in which case they were assumed to mean the same as uppercase B, M or K respectively; 
+- Economical impact was not corrected for inflation.
+
+
+```{r, cache=TRUE}
+storm<-read.csv(bz<-bzfile("repdata_data_StormData.csv.bz2","r"),as.is=TRUE)
+close(bz)
+storm<-cbind(storm,EVYEAR=strptime(storm$BGN_DATE,"%m/%d/%Y %H:%M:%S")$year+1900)
+
+DMG<-storm[,c("PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP","EVTYPE","EVYEAR")]
+#Multiply the PROPDMG and CROPDMG values by factor 10^3 if EXP=K|k, 10^6 if EXP=M|m, 10^9 if EXP=B|b
+DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="K"]<-DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="K"]*10^3
+DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="M"]<-DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="M"]*10^6
+DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="B"]<-DMG$PROPDMG[toupper(DMG$PROPDMGEXP)=="B"]*10^9
+
+DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="K"]<-DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="K"]*10^3
+DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="M"]<-DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="M"]*10^6
+DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="B"]<-DMG$CROPDMG[toupper(DMG$CROPDMGEXP)=="B"]*10^9
+
+#Remove the EXP columns, or they'll hinder summarization
+DMG<-DMG[,c("PROPDMG","CROPDMG","EVTYPE","EVYEAR")]
+```
+
+## Results
+
+### Public health impact
+The impact of severe weather events were analysed for fatal incidents and injury causing events separately. No further subclassification on the injuries was used in this analysis. 
+The Top5 of the number of fatalities and injuries was calculated to get an idea of the most impactful events. 
+```{r cache=TRUE, results='asis'}
+
+library(xtable)
+
+#Aggregate per event_type
+FI<-aggregate(cbind(FATALITIES,INJURIES)~EVTYPE,data=storm,sum)
+#Create dataframe for ranking table
+FI_ranked<-data.frame("rank"=as.character(1:5))
+FI_ranked<-cbind(FI_ranked,head(FI[order(FI$INJURIES,decreasing=T),c(1,3)],5))
+FI_ranked<-cbind(FI_ranked,head(FI[order(FI$FATALITIES,decreasing=T),c(1,2)],5))
+
+print(xtable(FI_ranked,align="r|l|lr|lr|"),hline.after=c(0,1,5),include.rownames=FALSE,type="html")
+
+```
+
+How much of the total amounts of injuries and fatalities do these Top5 events total up to?
+
+```{r cache=TRUE, results='asis'}
+#Create dataframe for totals table
+FI_totals<-data.frame("Impact"=c("Sum of Top 5","Total in dataset","Percentage"))
+FI_totals<-cbind(FI_totals,"Injuries"=c(srI<-sum(FI_ranked$INJURIES),ssI<-sum(storm$INJURIES),paste(as.character(format(100*srI/ssI,digits=0)),"%")))
+FI_totals<-cbind(FI_totals,"Fatalities"=c(srF<-sum(FI_ranked$FATALITIES),ssF<-sum(storm$FATALITIES),paste(as.character(format(100*srF/ssF,digits=0)),"%")))
+
+print(xtable(FI_totals,align="l|l|r|r|"),hline.after=c(0,1,3),include.rownames=FALSE,type="html")
+
+```
+
+Let's create a timeseries plot of the yearly summarized numbers of fatalities (Figure 1) and injuries (Figure 2), using the Top5 for each class. 
+```{r cache=T, fig.width=10}
+#Aggregate per event_type per year
+FI_year<-aggregate(cbind(FATALITIES,INJURIES)~EVTYPE+EVYEAR,data=storm,sum)
+
+#Create crosstable for FATALITIES, fill empty values with 0
+FAT<-data.frame("year"=unique(FI_year$EVYEAR))
+for(type in unique(FI_year$EVTYPE)){
+    temp<-data.frame(FI_year[FI_year$EVTYPE==type,])
+    temp1<-data.frame(type=temp$FATALITIES[pmatch(FAT$year,temp$EVYEAR)])
+    names(temp1)<-type
+    FAT<-cbind(FAT,temp1)
+}
+FAT[is.na(FAT)]<-0
+temp2<-NULL
+for(i in 1:length(FAT$year)) temp2[i]<-sum(FAT[i,-1])
+temp2<-as.data.frame(temp2)
+names(temp2)<-"Total"
+FAT<-cbind(FAT,temp2)
+
+library(ggplot2)
+
+
+#Absolute plot fatalities (Figure 1)
+FATabs_plot<-ggplot(data=FAT,aes(x=year)) +
+    ggtitle("Yearly number of fatalities by the Top 5 Severest Event Types over Time") +
+    geom_line(aes(y=FAT$"TORNADO",colour="TORNADO")) +
+    geom_line(aes(y=FAT$"EXCESSIVE HEAT",colour="EXCESSIVE HEAT")) +
+    geom_line(aes(y=FAT$"FLASH FLOOD",colour="FLASH FLOOD")) +
+    geom_line(aes(y=FAT$"HEAT",colour="HEAT")) +
+    geom_line(aes(y=FAT$"LIGHTNING",colour="LIGHTNING")) +
+    scale_y_continuous("Number of fatalities") +
+    scale_colour_discrete(name="Event Type")
+print(FATabs_plot)
+
+```
+__Figure 1__ In this timeseries plot, we see that Tornadoes cause fatalities every year. Although some other event types cause serious amount of fatalities, over time their effect is not as constant.
+
+```{r cache=T, fig.width=10}
+#Create crosstable for INJURIES, fill empty values with 0
+INJ<-data.frame("year"=unique(FI_year$EVYEAR))
+for(type in unique(FI_year$EVTYPE)){
+    temp<-data.frame(FI_year[FI_year$EVTYPE==type,])
+    temp1<-data.frame(type=temp$INJURIES[pmatch(INJ$year,temp$EVYEAR)])
+    names(temp1)<-type
+    INJ<-cbind(INJ,temp1)
+}
+INJ[is.na(INJ)]<-0
+temp2<-NULL
+for(i in 1:length(INJ$year)) temp2[i]<-sum(INJ[i,-1])
+temp2<-as.data.frame(temp2)
+names(temp2)<-"Total"
+INJ<-cbind(INJ,temp2)
+
+#Absolute plot injuries (Figure 2)
+INJabs_plot<-ggplot(data=INJ,aes(x=year)) +
+    ggtitle("Yearly number of injuries by the Top 5 Severest Event Types over Time") +
+    geom_line(aes(y=INJ$"TORNADO",colour="TORNADO")) +
+    geom_line(aes(y=INJ$"TSTM WIND",colour="TSTM WIND")) +
+    geom_line(aes(y=INJ$"FLOOD",colour="FLOOD")) +
+    geom_line(aes(y=INJ$"EXCESSIVE HEAT",colour="EXCESSIVE HEAT")) +
+    geom_line(aes(y=INJ$"LIGHTNING",colour="LIGHTNING")) +
+    scale_y_continuous("Number of injuries") +
+    scale_colour_discrete(name="Event Type")
+print(INJabs_plot)
+
+```
+__Figure 2__ In this timeseries plot, we see that Tornadoes cause injures every year. Although some other event types cause serious amount of injuries, over time their effect is not as constant.
+
+### Economical impact
+The impact of severe weather events were also analysed for economical impact, by looking at the Property and Crop damage. No further subclassification was used in this analysis. 
+The Top5 of the number of each was calculated to get an idea of the most impactful events. 
+```{r cache=TRUE, results='asis'}
+
+library(xtable)
+
+#Aggregate per event_type
+DMG_ag<-aggregate(cbind(PROPDMG,CROPDMG)~EVTYPE,data=DMG,sum)
+#Create dataframe for ranking table
+DMG_ranked<-data.frame("rank"=as.character(1:5))
+DMG_ranked<-cbind(DMG_ranked,head(DMG_ag[order(DMG_ag$PROPDMG,decreasing=T),c(1,2)],5))
+DMG_ranked<-cbind(DMG_ranked,head(DMG_ag[order(DMG_ag$CROPDMG,decreasing=T),c(1,3)],5))
+DMG_ranked[,c(3,5)]<-format(DMG_ranked[,c(3,5)]/10^9,digits=2)
+names(DMG_ranked)<-c("rank","Event Type","Property damage (billion dollars)","Event Type","Crop damage (billion dollars)")
+print(xtable(DMG_ranked,align="r|l|lr|lr|"),hline.after=c(0,1,5),include.rownames=FALSE,type="html")
+
+```
+
+How much of the total amounts of damage do these Top5 events total up to?
+
+```{r cache=TRUE, results='asis'}
+#Create dataframe for totals table
+DMG_totals<-data.frame("Impact"=c("Sum of Top 5","Total in dataset","Percentage"))
+DMG_totals<-cbind(DMG_totals,"Property damage (billion dollars)"=c(format(srP<-sum(head(DMG_ag[order(DMG_ag$PROPDMG,decreasing=T),2],5))/10^9,digits=0),format(ssP<-sum(DMG_ag$PROPDMG/10^9),digits=0),paste(as.character(format(100*srP/ssP,digits=0)),"%")))
+DMG_totals<-cbind(DMG_totals,"Crop damage (billion dollars)"=c(format(srC<-sum(head(DMG_ag[order(DMG_ag$CROPDMG,decreasing=T),3],5))/10^9,digits=0),format(ssC<-sum(DMG_ag$CROPDMG/10^9),digits=0),paste(as.character(format(100*srC/ssC,digits=0)),"%")))
+
+
+print(xtable(DMG_totals,align="l|l|r|r|"),hline.after=c(0,1,3),include.rownames=FALSE,type="html")
+
+```
+
+From the above table, it can be concluded that the overall damage of severe weather events to property is much larger than to crop (<10%). Also, the effects of the historical main cause of crop damage, drought, cannot be efficiently prevented. The main focus should therefore be on preventing the effects of flooding. 
+
+From the time series plot below (Figure 3) it appears that this is only recently becoming a serious problem, but we have indications that the dataset has not recorded all events before the early nineties. It should be investigated if flooding is a temporary issue, or that with the climate change ahead, this will only be even worse. 
+
+
+```{r cache=T, fig.width=10}
+#Aggregate per event_type per year
+DMG_year<-aggregate(cbind(PROPDMG,CROPDMG)~EVTYPE+EVYEAR,data=DMG,sum)
+
+#Create crosstable for PROPDMG, fill empty values with 0
+PROP<-data.frame("year"=unique(DMG_year$EVYEAR))
+for(type in unique(DMG_year$EVTYPE)){
+    temp<-data.frame(DMG_year[DMG_year$EVTYPE==type,])
+    temp1<-data.frame(type=temp$PROPDMG[pmatch(PROP$year,temp$EVYEAR)])
+    names(temp1)<-type
+    PROP<-cbind(PROP,temp1)
+}
+PROP[is.na(PROP)]<-0
+temp2<-NULL
+for(i in 1:length(PROP$year)) temp2[i]<-sum(PROP[i,-1])
+temp2<-as.data.frame(temp2)
+names(temp2)<-"Total"
+PROP<-cbind(PROP,temp2)
+
+#Absolute plot PROPDMG (Figure 3)
+PROPabs_plot<-ggplot(data=PROP,aes(x=year)) +
+    ggtitle("Yearly costs of Property Damage by the Top 5 Severest Event Types over Time") +
+    geom_line(aes(y=PROP$"FLOOD"/10^9,colour="FLOOD")) +
+    geom_line(aes(y=PROP$"HURRICANE/TYPHOON"/10^9,colour="HURRICANE/TYPHOON")) +
+    geom_line(aes(y=PROP$"TORNADO"/10^9,colour="TORNADO")) +
+    geom_line(aes(y=PROP$"STORM SURGE"/10^9,colour="STORM SURGE")) +
+    geom_line(aes(y=PROP$"FLASH FLOOD"/10^9,colour="FLASH FLOOD")) +
+    scale_y_continuous("Property Damage in Billion Dollars") +
+    scale_colour_discrete(name="Event Type")
+print(PROPabs_plot)
+```
+__Figure 3__ Flooding is historically the most impactful severe weather event, considering property damage. From this figure it can be concluded that it is only in recent years that this is a serious factor (in this dataset). 
