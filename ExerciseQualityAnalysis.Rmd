@@ -1,0 +1,66 @@
+# Predicting exercise quality
+By GTBoon72
+
+## Synopsis
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in a controlled study, whom were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+The data provided was classified with a cross validated random forest technique, and performed very well in predicting the results in random test sets, reaching accuracy levels of over 99%. In a validation set of only 20 cases, the resulting model classified all samples properly. 
+
+```{r}
+library(taRifx) #contains the japply function
+library(caret)
+
+# This is to allow R to use all processors in my laptop
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+## Data processing
+The data was obtained from the Coursera website as a comma separated file, which was kindly provided by the authors of the publication [1] in the References chapter. The R commands below show how this data was loaded into R. The original training set consisted of 19622 observations, with 160 variables. Exploratory data analysis showed that:  
+- many variables had many empty or NA values; these columns were removed
+- the first columns are index and time related, and were excluded from the dataset
+- all integer values were converted to numeric, to allow processing by the random forest procedure
+
+```{r cache=TRUE}
+training<-read.csv("pml-training.csv")
+
+training<-training[ , colSums(is.na(training)) == 0] # remove all NA columns
+training<-training[, -(1:7)] # remove informational columns
+training<-training[, colSums(training == "") < 1000] # remove columns with too many empty values
+training<-japply(training,which(sapply(training, class)=="integer"),as.numeric) # convert integer columns to numeric
+
+validating<-read.csv("pml-testing.csv")
+
+validating<-validating[ , colSums(is.na(validating)) == 0] # remove all NA columns
+validating<-validating[, -(1:7)] # remove informational columns
+validating<-validating[, colSums(validating == "") < 1000] # remove columns with too many empty values
+validating<-japply(validating,which(sapply(validating, class)=="integer"),as.numeric) # convert integer columns to numeric
+```
+
+## Main analysis
+The training data was used to train a model using the random forest technique, with 5-fold cross-validation. 10-fold cross-validation is the de facto standard, but is has the disadvantage that it splits the data in a 90/10 proportion over the training and testing datasets. Because of the size of the dataset, and in particular the small number of participants doing the exercises, I chose to use a 5-fold cross-validation, resulting in a 80/20 split. 
+I chose not to use Principal Component Analysis preprocessing, because of the relatively small amount of predictors in the remaining dataset (52), and because it reduces the variance in the dataset. 
+
+```{r cache=TRUE}
+model <- train(classe~., 
+            data=training,
+            method="rf",
+            trControl = trainControl(method = "cv", number = 5))
+```
+
+The accuracy parameter of the resulting model will be used to estimate the out-of-sample-error. 
+```{r cache=TRUE}
+model$resample
+``` 
+
+This shows that all folds have an accuracy of over 99%, so the out-of-sample-error should be very low. It is expected that less than 1 in a hundred new samples is incorrectly classified, and that in the validation set of 20 observations no more than 1 error should occur. 
+
+## Results
+The model was used to predict the very small set of validation observations, which turned out to be all correct, confirming that the out-of-sample-error is very low. 
+```{r}
+pred_rf_validating<-predict(model,validating)
+pred_rf_validating
+```
+
+## References
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. A link is availabled at http://groupware.les.inf.puc-rio.br/har
